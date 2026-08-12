@@ -5,28 +5,58 @@ import java.time.Instant;
 import java.util.*;
 
 public class Main {
-    record Asset(String type, BigDecimal value, String owner) {}
+    static class Asset {
+        private final String type;
+        private final BigDecimal value;
+        private final String owner;
 
-    record Token(UUID tokenId, Asset asset) {
-        static Token create(Asset asset) {
-            return new Token(UUID.randomUUID(), asset);
+        public Asset(String type, BigDecimal value, String owner) {
+            this.type = type;
+            this.value = value;
+            this.owner = owner;
         }
+
+        public String getType() { return type; }
+        public BigDecimal getValue() { return value; }
+        public String getOwner() { return owner; }
     }
 
-    record Transaction(UUID id, String tokenId, String fromOwner, String toOwner,
-                        Instant timestamp, String previousHash, String hash) {
+    static class Token {
+        private final UUID tokenId;
+        private final Asset asset;
 
-        static final String GENESIS_HASH = "0".repeat(64);
-
-        static Transaction create(String tokenId, String from, String to, String previousHash) {
-            Instant now = Instant.now();
-            String hash = computeHash(tokenId, from, to, now, previousHash);
-            return new Transaction(UUID.randomUUID(), tokenId, from, to, now, previousHash, hash);
+        public Token(Asset asset) {
+            this.tokenId = UUID.randomUUID();
+            this.asset = asset;
         }
 
-        static String computeHash(String tokenId, String from, String to, Instant ts, String prevHash) {
+        public UUID getTokenId() { return tokenId; }
+        public Asset getAsset() { return asset; }
+    }
+
+    static class Transaction {
+        static final String GENESIS_HASH = "0".repeat(64);
+        private final UUID id;
+        private final String tokenId;
+        private final String fromOwner;
+        private final String toOwner;
+        private final Instant timestamp;
+        private final String previousHash;
+        private final String hash;
+
+        public Transaction(String tokenId, String fromOwner, String toOwner, String previousHash) {
+            this.id = UUID.randomUUID();
+            this.tokenId = tokenId;
+            this.fromOwner = fromOwner;
+            this.toOwner = toOwner;
+            this.timestamp = Instant.now();
+            this.previousHash = previousHash;
+            this.hash = computeHash();
+        }
+
+        private String computeHash() {
             try {
-                String input = tokenId + from + to + ts + prevHash;
+                String input = tokenId + fromOwner + toOwner + timestamp + previousHash;
                 MessageDigest digest = MessageDigest.getInstance("SHA-256");
                 byte[] bytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
                 StringBuilder sb = new StringBuilder();
@@ -36,81 +66,43 @@ public class Main {
                 throw new RuntimeException(e);
             }
         }
+
+        public String getHash() { return hash; }
+        public String getPreviousHash() { return previousHash; }
     }
 
     static class Ledger {
         private final List<Transaction> transactions = new ArrayList<>();
 
-        String latestHash() {
-            return transactions.isEmpty() ? Transaction.GENESIS_HASH : transactions.get(transactions.size() - 1).hash();
-        }
-
-        Transaction recordTransfer(String tokenId, String from, String to) {
-            Transaction tx = Transaction.create(tokenId, from, to, latestHash());
+        public Transaction recordTransfer(String tokenId, String from, String to) {
+            String prevHash = transactions.isEmpty() ? Transaction.GENESIS_HASH
+                    : transactions.get(transactions.size() - 1).getHash();
+            Transaction tx = new Transaction(tokenId, from, to, prevHash);
             transactions.add(tx);
             return tx;
         }
 
-        boolean validateIntegrity() {
+        public boolean validateIntegrity() {
             String expected = Transaction.GENESIS_HASH;
             for (Transaction tx : transactions) {
-                if (!tx.previousHash().equals(expected)) return false;
-                expected = tx.hash();
+                if (!tx.getPreviousHash().equals(expected)) return false;
+                expected = tx.getHash();
             }
             return true;
         }
 
-        int size() {
-            return transactions.size();
-        }
-    }
-
-    static class Registry {
-        private final Map<UUID, Token> tokens = new LinkedHashMap<>();
-        private final Map<UUID, String> currentOwners = new HashMap<>();
-
-        Token register(Asset asset) {
-            Token token = Token.create(asset);
-            tokens.put(token.tokenId(), token);
-            currentOwners.put(token.tokenId(), asset.owner());
-            return token;
-        }
-
-        String currentOwner(UUID tokenId) {
-            return currentOwners.get(tokenId);
-        }
-
-        void setOwner(UUID tokenId, String newOwner) {
-            currentOwners.put(tokenId, newOwner);
-        }
-
-        int size() {
-            return tokens.size();
-        }
+        public int size() { return transactions.size(); }
     }
 
     public static void main(String[] args) {
-        Registry registry = new Registry();
+        Asset asset = new Asset("EQUIPMENT", new BigDecimal("1500.00"), "Northstar");
+        Token token = new Token(asset);
         Ledger ledger = new Ledger();
 
-        Token equipment = registry.register(new Asset("EQUIPMENT", new BigDecimal("1500.00"), "Northstar"));
-        Token invoice = registry.register(new Asset("INVOICE", new BigDecimal("2400.00"), "Arcadia"));
+        ledger.recordTransfer(token.getTokenId().toString(), "Northstar", "Arcadia");
+        ledger.recordTransfer(token.getTokenId().toString(), "Arcadia", "Vantage");
 
-        transfer(registry, ledger, equipment.tokenId(), "Vantage");
-        transfer(registry, ledger, invoice.tokenId(), "Northstar");
-        transfer(registry, ledger, equipment.tokenId(), "Arcadia");
-
-        System.out.println("Registered assets: " + registry.size());
-        System.out.println("Ledger transactions: " + ledger.size());
+        System.out.println("Transactions: " + ledger.size());
         System.out.println("Chain valid: " + ledger.validateIntegrity());
-    }
-
-    static void transfer(Registry registry, Ledger ledger, UUID tokenId, String newOwner) {
-        String currentOwner = registry.currentOwner(tokenId);
-        if (currentOwner.equals(newOwner)) {
-            throw new IllegalArgumentException("Cannot transfer to same owner");
-        }
-        ledger.recordTransfer(tokenId.toString(), currentOwner, newOwner);
-        registry.setOwner(tokenId, newOwner);
     }
 }
