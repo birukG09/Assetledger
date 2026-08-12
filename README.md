@@ -84,7 +84,7 @@ com.assetledger.api           Spring Boot REST API and JSON DTOs
 1. Assets and tokens are immutable; current ownership is held by the registry so the historical asset definition never changes.
 2. Transactions include their own id, timestamp, previous hash, and derived hash, making tampering detectable without a networked blockchain.
 3. SQLite stores the current registry projection and the append-only transaction history.
-4. The demo seed is idempotent and only runs when the local database is empty.
+4. The demo seed is idempotent and only runs when the local database is empty..
 
 ## Scope
 
