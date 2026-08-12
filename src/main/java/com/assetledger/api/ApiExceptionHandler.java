@@ -1,6 +1,8 @@
 package com.assetledger.api;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -13,6 +15,9 @@ import java.util.stream.Collectors;
 
 @RestControllerAdvice
 public final class ApiExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
+
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<ErrorResponse> notFound(
             NoSuchElementException exception,
@@ -33,14 +38,24 @@ public final class ApiExceptionHandler {
 
     @ExceptionHandler(SQLException.class)
     public ResponseEntity<ErrorResponse> persistenceFailure(SQLException exception) {
-        return response(HttpStatus.INTERNAL_SERVER_ERROR, "Persistence error: " + exception.getMessage());
+        // Log full detail server-side; never return raw SQL/db-path detail to the client
+        log.error("Persistence failure", exception);
+        return response(HttpStatus.INTERNAL_SERVER_ERROR, "A persistence error occurred. Please try again.");
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> unexpected(Exception exception) {
+        // Catch-all so unmapped exceptions never leak a raw stack trace to the client
+        log.error("Unhandled exception", exception);
+        return response(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred.");
     }
 
     private ResponseEntity<ErrorResponse> response(HttpStatus status, String message) {
+        String safeMessage = message == null || message.isBlank()
+                ? status.getReasonPhrase()
+                : message;
         return ResponseEntity.status(status).body(
-                new ErrorResponse(message == null || message.isBlank()
-                        ? status.getReasonPhrase()
-                        : message)
+                ErrorResponse.of(safeMessage, status.value())
         );
     }
 }
