@@ -3,60 +3,78 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.*;
-import java.util.function.UnaryOperator;
 
 public class Main {
-    record Asset(String type, BigDecimal value, String owner) {}
-    record Token(UUID tokenId, Asset asset) {}
-    record Transaction(UUID id, String tokenId, String fromOwner, String toOwner,
-                        Instant timestamp, String previousHash, String hash) {
-        static final String GENESIS_HASH = "0".repeat(64);
+    interface HashStrategy {
+        String hash(String input);
     }
 
-    static final UnaryOperator<String> sha256 = input -> {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] bytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : bytes) sb.append(String.format("%02x", b));
-            return sb.toString();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+    static class Sha256Strategy implements HashStrategy {
+        public String hash(String input) {
+            try {
+                MessageDigest digest = MessageDigest.getInstance("SHA-256");
+                byte[] bytes = digest.digest(input.getBytes(StandardCharsets.UTF_8));
+                StringBuilder sb = new StringBuilder();
+                for (byte b : bytes) sb.append(String.format("%02x", b));
+                return sb.toString();
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
-    };
-
-    static Transaction transferFn(String tokenId, String from, String to, String prevHash) {
-        Instant now = Instant.now();
-        String hash = sha256.apply(tokenId + from + to + now + prevHash);
-        return new Transaction(UUID.randomUUID(), tokenId, from, to, now, prevHash, hash);
     }
 
-    static List<Transaction> appendTransfer(List<Transaction> chain, String tokenId, String from, String to) {
-        String prevHash = chain.isEmpty() ? Transaction.GENESIS_HASH : chain.get(chain.size() - 1).hash();
-        Transaction tx = transferFn(tokenId, from, to, prevHash);
-        List<Transaction> updated = new ArrayList<>(chain);
-        updated.add(tx);
-        return List.copyOf(updated);
+    interface LedgerEntry {
+        String getHash();
+        String getPreviousHash();
     }
 
-    static boolean isChainValid(List<Transaction> chain) {
-        String[] expected = { Transaction.GENESIS_HASH };
-        return chain.stream().allMatch(tx -> {
-            boolean valid = tx.previousHash().equals(expected[0]);
-            expected[0] = tx.hash();
-            return valid;
-        });
+    static class Transaction implements LedgerEntry {
+        static final String GENESIS_HASH = "0".repeat(64);
+        final String tokenId, fromOwner, toOwner, previousHash, hash;
+
+        Transaction(String tokenId, String from, String to, String previousHash, HashStrategy strategy) {
+            this.tokenId = tokenId;
+            this.fromOwner = from;
+            this.toOwner = to;
+            this.previousHash = previousHash;
+            this.hash = strategy.hash(tokenId + from + to + Instant.now() + previousHash);
+        }
+
+        public String getHash() { return hash; }
+        public String getPreviousHash() { return previousHash; }
+    }
+
+    static class Ledger {
+        private final List<LedgerEntry> entries = new ArrayList<>();
+        private final HashStrategy hashStrategy;
+
+        Ledger(HashStrategy hashStrategy) {
+            this.hashStrategy = hashStrategy;
+        }
+
+        void recordTransfer(String tokenId, String from, String to) {
+            String prevHash = entries.isEmpty() ? Transaction.GENESIS_HASH : entries.get(entries.size() - 1).getHash();
+            entries.add(new Transaction(tokenId, from, to, prevHash, hashStrategy));
+        }
+
+        boolean validateIntegrity() {
+            String expected = Transaction.GENESIS_HASH;
+            for (LedgerEntry entry : entries) {
+                if (!entry.getPreviousHash().equals(expected)) return false;
+                expected = entry.getHash();
+            }
+            return true;
+        }
+
+        int size() { return entries.size(); }
     }
 
     public static void main(String[] args) {
-        Asset asset = new Asset("EQUIPMENT", new BigDecimal("1500.00"), "Northstar");
-        Token token = new Token(UUID.randomUUID(), asset);
+        Ledger ledger = new Ledger(new Sha256Strategy());
+        ledger.recordTransfer("TOKEN-1", "Northstar", "Arcadia");
+        ledger.recordTransfer("TOKEN-1", "Arcadia", "Vantage");
 
-        List<Transaction> chain = List.of();
-        chain = appendTransfer(chain, token.tokenId().toString(), "Northstar", "Arcadia");
-        chain = appendTransfer(chain, token.tokenId().toString(), "Arcadia", "Vantage");
-
-        System.out.println("Transactions: " + chain.size());
-        System.out.println("Chain valid: " + isChainValid(chain));
+        System.out.println("Transactions: " + ledger.size());
+        System.out.println("Chain valid: " + ledger.validateIntegrity());
     }
 }
