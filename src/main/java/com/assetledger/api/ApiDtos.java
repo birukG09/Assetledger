@@ -15,10 +15,13 @@ record CreateAssetRequest(
         @NotBlank String owner,
         Map<String, String> metadata
 ) {
+    // Compact constructor: guards against NPEs downstream if metadata is omitted from the request body
+    CreateAssetRequest {
+        metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+    }
 }
 
-record TransferRequest(@NotBlank String recipient) {
-}
+record TransferRequest(@NotBlank String recipient) { }
 
 record AssetResponse(
         String tokenId,
@@ -29,8 +32,7 @@ record AssetResponse(
         String currentOwner,
         Map<String, String> metadata,
         Instant createdAt
-) {
-}
+) { }
 
 record TransactionResponse(
         String transactionId,
@@ -40,8 +42,7 @@ record TransactionResponse(
         Instant timestamp,
         String previousHash,
         String hash
-) {
-}
+) { }
 
 record SummaryResponse(
         int assetCount,
@@ -49,11 +50,13 @@ record SummaryResponse(
         int transactionCount,
         int ownerCount,
         boolean ledgerIntegrity
-) {
-}
+) { }
 
-record HealthResponse(String status, boolean ledgerIntegrity) {
-}
+record HealthResponse(String status, boolean ledgerIntegrity) { }
 
-record ErrorResponse(String error) {
+record ErrorResponse(String error, Instant timestamp, int status) {
+    // Convenience factory so callers don't repeat Instant.now() everywhere
+    static ErrorResponse of(String error, int status) {
+        return new ErrorResponse(error, Instant.now(), status);
+    }
 }
